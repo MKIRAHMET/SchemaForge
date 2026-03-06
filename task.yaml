@@ -1,0 +1,88 @@
+prompt: |
+  You are working inside a Docker container.
+
+  Your task is to implement a JSON Schema validator.
+
+  Input file:
+  /workdir/data/validation_request.json
+
+  The file contains:
+  - a list of schemas
+  - a list of documents to validate
+
+  Each document references a schema using "schema_id".
+
+  Your program must:
+
+  1. Read the input file
+  2. Validate each document against its schema
+  3. Collect all validation errors
+  4. Write results to:
+
+  /workdir/validation_results.json
+
+  Validation rules you must implement:
+
+  Types:
+  string, number, integer, boolean, null, array, object
+
+  String constraints:
+  minLength, maxLength, pattern
+  formats: email, date, uuid, uri
+
+  Number constraints:
+  minimum, maximum
+  exclusiveMinimum, exclusiveMaximum
+  multipleOf
+
+  Array constraints:
+  minItems, maxItems
+  uniqueItems
+  items
+
+  Object constraints:
+  required
+  properties
+  additionalProperties
+
+  Enum constraint:
+  enum
+
+  Error format:
+
+  {
+    "path": "$.field",
+    "message": "Human readable message",
+    "constraint": "constraint_name",
+    "expected": "...",
+    "actual": "..."
+  }
+
+  Output format:
+
+  {
+    "validation_results": [],
+    "summary": {
+      "total_documents": int,
+      "valid_documents": int,
+      "invalid_documents": int,
+      "total_errors": int,
+      "errors_by_constraint": {}
+    }
+  }
+
+metadata:
+  difficulty: hard
+  category: data_validation
+  required_tools:
+    - bash
+    - python
+  tags:
+    - json
+    - schema
+    - validation
+  time_limit: 600
+  memory_limit: 512
+  max_agent_timeout_sec: 400
+  expert_time_estimate_min: 25
+  junior_time_estimate_min: 50
