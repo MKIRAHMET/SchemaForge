@@ -315,3 +315,4 @@ output.write_text(json.dumps({
     'validation_results': validation_results,
     'summary': summary
 }, indent=2))
+PY
