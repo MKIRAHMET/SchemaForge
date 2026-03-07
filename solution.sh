@@ -12,8 +12,8 @@ import uuid
 input_path = Path("/workdir/data/validation_request.json")
 data = json.loads(input_path.read_text())
 
-schemas = data [ 'schemas']
-documents = data [ 'documents']
+schemas = data['schemas']
+documents = data['documents']
 
 validation_results = []
 
@@ -82,9 +82,9 @@ def validate_string(field_path, value, rules):
                     'path': field_path,
                     'message': "Invalid date format",
                     'constraint': 'format',
-                    'expected': 'date-time',
+                    'expected': 'date',
                     'actual': value
-                })
+                }) 
         elif fmt == 'uuid':
             try:
                 uuid.UUID(value)
@@ -148,6 +148,16 @@ def validate_number(field_path, value, rules):
                     'constraint': 'maximum',
                     'expected': max_val,
                     'actual': value
+                })
+    if 'multipleOf' in rules:
+        divisor = rules['multipleOf']
+        if value % divisor != 0:
+            errors.append({
+                'path' : field_path,
+                'message' : 'Value not a multiple',
+                'constraint' : 'multipleOf',
+                'expected' : divisor,
+                'actual' : value
                 })
     return errors
 
@@ -263,6 +273,22 @@ for doc in documents:
     schema_id = doc['schema_id']
     doc_data = doc['data']
     schema = schema_dict.get(schema_id)
+
+    if not schema:
+    validation_results.append({
+        'document_id': doc_id,
+        'schema_id': schema_id,
+        'valid': False,
+        'errors': [{
+            'path': '$',
+            'message': 'Schema not found',
+            'constraint': 'schema',
+            'expected': 'existing schema',
+            'actual': schema_id
+        }]
+    })
+    continue
+
     errors = validate_field('$', doc_data, schema)
     validation_results.append({
             'document_id': doc_id,
@@ -270,17 +296,21 @@ for doc in documents:
             'valid': len(errors) == 0,
             'errors': errors
         })
-
+errors_by_constraint = {}
+for result in validation_results:
+    for error in result['errors']:
+        constraint = error['constraint']
+        errors_by_constraint[constraint] = errors_by_constraint.get(constraint, 0) + 1
 
 summary = {
     'total_documents': len(documents),
     'valid_documents': sum(1 for r in validation_results if r['valid']),
     'invalid_documents': sum(1 for r in validation_results if not r['valid']),
     'total_errors': sum(len(r['errors']) for r in validation_results),
-    'errors_by_constraint': {}
+    'errors_by_constraint': errors_by_constraint
 }
 
-output = Path("/workdir/data/validation_results.json")
+output = Path("/workdir/validation_results.json")
 output.write_text(json.dumps({
     'validation_results': validation_results,
     'summary': summary
