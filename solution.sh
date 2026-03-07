@@ -23,7 +23,7 @@ def check_type(value, expected_type):
     if expected_type == "string":
         return isinstance(value, str)
     elif expected_type == "integer":
-        return isinstance(value, int)
+        return isinstance(value, int) and not isinstance(value, bool)
     elif expected_type == "number":
         return isinstance(value, (int, float))
     elif expected_type == "boolean":
@@ -151,7 +151,7 @@ def validate_number(field_path, value, rules):
                 })
     if 'multipleOf' in rules:
         divisor = rules['multipleOf']
-        if value % divisor != 0:
+        if value / divisor != int(value / divisor):
             errors.append({
                 'path' : field_path,
                 'message' : 'Value not a multiple',
@@ -275,21 +275,21 @@ for doc in documents:
     schema = schema_dict.get(schema_id)
 
     if not schema:
-    validation_results.append({
-        'document_id': doc_id,
-        'schema_id': schema_id,
-        'valid': False,
-        'errors': [{
-            'path': '$',
-            'message': 'Schema not found',
-            'constraint': 'schema',
-            'expected': 'existing schema',
-            'actual': schema_id
-        }]
-    })
-    continue
+        validation_results.append({
+            'document_id': doc_id,
+            'schema_id': schema_id,
+            'valid': False,
+            'errors': [{
+                'path': '$',
+                'message': 'Schema not found',
+                'constraint': 'schema',
+                'expected': 'existing schema',
+                'actual': schema_id
+            }]
+        })
+        continue
 
-    errors = validate_field('$', doc_data, schema)
+    errors = validate_document(doc_data, schema)
     validation_results.append({
             'document_id': doc_id,
             'schema_id': schema_id,
