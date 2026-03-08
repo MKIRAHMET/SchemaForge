@@ -239,15 +239,16 @@ def validate_object(field_path, value, rules):
             errors += validate_field(f"{field_path}.{key}", value[key], prop_schema)
 
     if rules.get("additionalProperties", True) is False:
-        allowed_keys = set(props.keys())
+        allowed_keys = list(props.keys())
+        allowed_keys_set = set(allowed_keys)
         for key in value:
-            if key not in allowed_keys:
+            if key not in allowed_keys_set:
                 errors.append({
-                    "path": field_path,
-                    "message": f"Additional property '{key}' not allowed",
-                    "constraint": "additionalProperties",
-                    "expected": f"only {', '.join(allowed_keys)}",
-                    "actual": key,
+                    'path': field_path,
+                    'message': f"Additional property '{key}' not allowed",
+                    'constraint': 'additionalProperties',
+                    'expected': f"only {', '.join(allowed_keys)}",
+                    'actual': key
                 })
 
     return errors
