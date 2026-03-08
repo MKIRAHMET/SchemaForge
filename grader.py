@@ -1,64 +1,366 @@
 import json
 from pathlib import Path
 from apex_arena._types import GradingResult 
+import re
+from datetime import datetime
+import uuid
 
-def grade(_: str) -> GradingResult:
-    results_path = Path("/workdir/validation_results.json")
-    if not results_path.exists():
-        return GradingResult(
-            score = 0.0,
-            feedback = 'File not found'
-        )
-    try:
-        data = json.loads(results_path.read_text())
-    except Exception:
-        return GradingResult(
-            score = 0.0,
-            feedback = 'Invalid JSON format'
-        ) 
-    
-    validation_results = data.get('validation_results', [])
-    summary = data.get('summary', {})
-
-
-    if not isinstance(validation_results, list):
-        raise ValueError("validation_results must be a list")
-
-    if not isinstance(summary, dict):
-        raise ValueError("summary must be a dictionary")
-
-    total_docs = summary.get('total_documents', 0)
-    valid_docs = summary.get('valid_documents', 0)
-
-    if not isinstance(total_docs, int) or not isinstance(valid_docs, int):
-        raise ValueError("total_documents and valid_documents must be integers")
-
-    if total_docs != len(validation_results):
-        return GradingResult(
-            score = 0.0,
-            feedback = 'total_documents does not match the number of validation results'
-        )
-
-    score = 0.0
-
-    if total_docs > 0:
-        score = valid_docs / total_docs
-
-
-    for result in validation_results:
-        if 'document_id' not in result:
-            raise ValueError("Missing document_id in result")
-        if 'valid' not in result:
-            raise ValueError("Missing valid in result")
-        if 'errors' not in result:
-            raise ValueError("Missing errors in result")
-
-
+def make_result(score: float, feedback: str) -> GradingResult:
     return GradingResult(
         score=score,
         subscores={'validation': score},
         weights={'validation': 1.0},
-        feedback=f"Validated {valid_docs} out of {total_docs} documents"
+        feedback=feedback,
     )
 
+def check_type(value, expected_type):
+    if expected_type == "string":
+        return isinstance(value, str)
+    elif expected_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    elif expected_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    elif expected_type == "boolean":
+        return isinstance(value, bool)
+    elif expected_type == "null":
+        return value is None
+    elif expected_type == "array":
+        return isinstance(value, list)
+    elif expected_type == "object":
+        return isinstance(value, dict)
+    return False
 
+
+def validate_enum(field_path, value, rules):
+    errors = []
+    if "enum" in rules and value not in rules["enum"]:
+        errors.append({
+            "path": field_path,
+            "message": f"Value not in enum {rules['enum']}",
+            "constraint": "enum",
+            "expected": rules["enum"],
+            "actual": value,
+        })
+    return errors
+
+def validate_string(field_path, value, rules):
+    errors = []
+
+    if "minLength" in rules and len(value) < rules["minLength"]:
+        errors.append({
+            "path": field_path,
+            "message": f"String too short, minimum is {rules['minLength']}",
+            "constraint": "minLength",
+            "expected": rules["minLength"],
+            "actual": len(value),
+        })
+
+    if "maxLength" in rules and len(value) > rules["maxLength"]:
+        errors.append({
+            "path": field_path,
+            "message": f"String too long, maximum is {rules['maxLength']}",
+            "constraint": "maxLength",
+            "expected": rules["maxLength"],
+            "actual": len(value),
+        })
+
+    if "pattern" in rules and not re.match(rules["pattern"], value):
+        errors.append({
+            "path": field_path,
+            "message": f"String does not match pattern {rules['pattern']}",
+            "constraint": "pattern",
+            "expected": rules["pattern"],
+            "actual": value,
+        })
+
+    if "format" in rules:
+        fmt = rules["format"]
+
+        if fmt == "email" and not re.match(r"^[^@]+@[^@]+\.[^@]+$", value):
+            errors.append({
+                "path": field_path,
+                "message": "Invalid email format",
+                "constraint": "format",
+                "expected": "email",
+                "actual": value,
+            })
+
+        elif fmt == "date":
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                errors.append({
+                    "path": field_path,
+                    "message": "Invalid date format",
+                    "constraint": "format",
+                    "expected": "date",
+                    "actual": value,
+                })
+
+        elif fmt == "uuid":
+            try:
+                uuid.UUID(value)
+            except ValueError:
+                errors.append({
+                    "path": field_path,
+                    "message": "Invalid UUID",
+                    "constraint": "format",
+                    "expected": "uuid",
+                    "actual": value,
+                })
+
+        elif fmt == "uri":
+            if not (value.startswith("http://") or value.startswith("https://")):
+                errors.append({
+                    "path": field_path,
+                    "message": "Invalid URI format",
+                    "constraint": "format",
+                    "expected": "uri",
+                    "actual": value,
+                })
+
+    return errors
+
+
+def validate_number(field_path, value, rules):
+    errors = []
+
+    if "minimum" in rules:
+        min_val = rules["minimum"]
+        if rules.get("exclusiveMinimum", False):
+            if value <= min_val:
+                errors.append({
+                    "path": field_path,
+                    "message": "Value <= exclusive minimum",
+                    "constraint": "exclusiveMinimum",
+                    "expected": f">{min_val}",
+                    "actual": value,
+                })
+        else:
+            if value < min_val:
+                errors.append({
+                    "path": field_path,
+                    "message": "Value < minimum",
+                    "constraint": "minimum",
+                    "expected": min_val,
+                    "actual": value,
+                })
+
+    if "maximum" in rules:
+        max_val = rules["maximum"]
+        if rules.get("exclusiveMaximum", False):
+            if value >= max_val:
+                errors.append({
+                    "path": field_path,
+                    "message": "Value >= exclusive maximum",
+                    "constraint": "exclusiveMaximum",
+                    "expected": f"<{max_val}",
+                    "actual": value,
+                })
+        else:
+            if value > max_val:
+                errors.append({
+                    "path": field_path,
+                    "message": "Value > maximum",
+                    "constraint": "maximum",
+                    "expected": max_val,
+                    "actual": value,
+                })
+
+    if "multipleOf" in rules:
+        divisor = rules["multipleOf"]
+        if value / divisor != int(value / divisor):
+            errors.append({
+                "path": field_path,
+                "message": "Value not a multiple",
+                "constraint": "multipleOf",
+                "expected": divisor,
+                "actual": value,
+            })
+
+    return errors
+
+def validate_array(field_path, value, rules):
+    errors = []
+
+    if "minItems" in rules and len(value) < rules["minItems"]:
+        errors.append({
+            "path": field_path,
+            "message": f"Array too short (min {rules['minItems']})",
+            "constraint": "minItems",
+            "expected": rules["minItems"],
+            "actual": len(value),
+        })
+
+    if "maxItems" in rules and len(value) > rules["maxItems"]:
+        errors.append({
+            "path": field_path,
+            "message": f"Array too long (max {rules['maxItems']})",
+            "constraint": "maxItems",
+            "expected": rules["maxItems"],
+            "actual": len(value),
+        })
+
+    if rules.get("uniqueItems", False):
+        if len(value) != len(set(map(str, value))):
+            errors.append({
+                "path": field_path,
+                "message": "Array items not unique",
+                "constraint": "uniqueItems",
+                "expected": "all unique",
+                "actual": value,
+            })
+
+    if "items" in rules:
+        item_schema = rules["items"]
+        for idx, item in enumerate(value):
+            item_path = f"{field_path}[{idx}]"
+            errors += validate_field(item_path, item, item_schema)
+
+    return errors
+
+
+def validate_object(field_path, value, rules):
+    errors = []
+
+    for req in rules.get("required", []):
+        if req not in value:
+            errors.append({
+                "path": field_path,
+                "message": "Missing required property",
+                "constraint": "required",
+                "expected": "present",
+                "actual": "missing",
+            })
+
+    props = rules.get("properties", {})
+    for key, prop_schema in props.items():
+        if key in value:
+            errors += validate_field(f"{field_path}.{key}", value[key], prop_schema)
+
+    if rules.get("additionalProperties", True) is False:
+        allowed_keys = set(props.keys())
+        for key in value:
+            if key not in allowed_keys:
+                errors.append({
+                    "path": field_path,
+                    "message": f"Additional property '{key}' not allowed",
+                    "constraint": "additionalProperties",
+                    "expected": f"only {', '.join(allowed_keys)}",
+                    "actual": key,
+                })
+
+    return errors
+
+def validate_field(field_path, value, rules):
+    errors = []
+
+    expected_type = rules.get("type")
+    if expected_type and not check_type(value, expected_type):
+        errors.append({
+            "path": field_path,
+            "message": f"Type mismatch, expected {expected_type}",
+            "constraint": "type",
+            "expected": expected_type,
+            "actual": type(value).__name__,
+        })
+        return errors
+
+    errors += validate_enum(field_path, value, rules)
+
+    if expected_type == "string":
+        errors += validate_string(field_path, value, rules)
+    elif expected_type in ("integer", "number"):
+        errors += validate_number(field_path, value, rules)
+    elif expected_type == "array":
+        errors += validate_array(field_path, value, rules)
+    elif expected_type == "object":
+        errors += validate_object(field_path, value, rules)
+
+    return errors
+
+
+def validate_document(doc_data, schema):
+    return validate_field("$", doc_data, schema)
+
+
+def grade(_: str) -> GradingResult:
+    input_data = None
+    for path in [
+        Path("/tests/validation_request.json"),
+        Path("/workdir/data/validation_request.json"),
+    ]:
+        if path.exists():
+            input_data = json.loads(path.read_text())
+            break
+
+    if input_data is None:
+        return make_result(0.0, "Input validation_request.json not found")
+    
+    output_path = Path("/workdir/validation_results.json")
+    
+    if not output_path.exists():
+        return make_result(0.0, "Output validation_results.json not found")
+    
+    try:
+        actual = json.loads(output_path.read_text())
+    except Exception:
+        return make_result(0.0, "Output validation_results.json is not valid JSON")
+    
+    schemas = input_data.get("schemas", [])
+    documents = input_data.get("documents", [])
+
+    if not isinstance(schemas, list) or not isinstance(documents, list):
+        return make_result(0.0, "Input file must contain schemas and documents lists")
+
+    schema_dict = {schema["schema_id"]: schema["schema"] for schema in schemas}
+
+    expected_results = []
+
+    for doc in documents:
+        doc_id = doc["document_id"]
+        schema_id = doc["schema_id"]
+        doc_data = doc.get("data", {})
+        schema = schema_dict.get(schema_id)
+
+        if not schema:
+            errors = [{
+                "path": "$",
+                "message": "Schema not found",
+                "constraint": "schema",
+                "expected": "existing schema",
+                "actual": schema_id,
+            }]
+        else:
+            errors = validate_document(doc_data, schema)
+
+        expected_results.append({
+            "document_id": doc_id,
+            "schema_id": schema_id,
+            "valid": len(errors) == 0,
+            "errors": errors,
+        })
+    
+        errors_by_constraint = {}
+    for result in expected_results:
+        for error in result["errors"]:
+            constraint = error["constraint"]
+            errors_by_constraint[constraint] = errors_by_constraint.get(constraint, 0) + 1
+
+    expected_summary = {
+        "total_documents": len(documents),
+        "valid_documents": sum(1 for r in expected_results if r["valid"]),
+        "invalid_documents": sum(1 for r in expected_results if not r["valid"]),
+        "total_errors": sum(len(r["errors"]) for r in expected_results),
+        "errors_by_constraint": errors_by_constraint,
+    }
+
+    expected = {
+        "validation_results": expected_results,
+        "summary": expected_summary,
+    }
+
+    if actual == expected:
+        return make_result(1.0, "Output matches expected ground truth")
+
+    return make_result(0.0, "Output does not match expected ground truth")

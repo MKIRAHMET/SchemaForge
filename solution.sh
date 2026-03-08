@@ -17,7 +17,7 @@ documents = data['documents']
 
 validation_results = []
 
-schema_dict = {schema['schema_id']: schema for schema in schemas}
+schema_dict = {schema['schema_id']: schema['schema'] for schema in schemas}
 
 def check_type(value, expected_type):
     if expected_type == "string":
